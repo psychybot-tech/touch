@@ -1,9 +1,11 @@
 import os
 import asyncio
 import logging
+import re
+from html import escape
 from dotenv import load_dotenv
 from twikit import Client, TooManyRequests
-from telegram import Bot
+from telegram import Bot, InputMediaPhoto
 from telegram.error import TelegramError
 
 # ─────────────────────────────────────────────
@@ -66,6 +68,38 @@ async def get_twitter_client() -> Client:
 
 
 # ─────────────────────────────────────────────
+# Text formatting helper
+# ─────────────────────────────────────────────
+def format_tweet_text(tweet) -> str:
+    # Extract raw full text
+    raw_text = getattr(tweet, 'full_text', None) or getattr(tweet, 'text', '')
+
+    # Expand t.co URLs if tweet.urls is available
+    urls_map = {}
+    if hasattr(tweet, 'urls') and tweet.urls:
+        for u in tweet.urls:
+            if isinstance(u, dict):
+                short = u.get('url')
+                expanded = u.get('expanded_url') or u.get('display_url')
+                if short and expanded:
+                    urls_map[short] = expanded
+
+    for short_url, expanded_url in urls_map.items():
+        raw_text = raw_text.replace(short_url, expanded_url)
+
+    # Remove remaining t.co links (media links / quote links)
+    raw_text = re.sub(r'https://t\.co/\w+', '', raw_text)
+
+    # Escape HTML special chars safely
+    text = escape(raw_text.strip())
+
+    # Convert @Username to clickable HTML link: <a href="https://x.com/Username">@Username</a>
+    text = re.sub(r'@([A-Za-z0-9_]+)', r'<a href="https://x.com/\1">@\1</a>', text)
+
+    return text.strip()
+
+
+# ─────────────────────────────────────────────
 # Main polling loop
 # ─────────────────────────────────────────────
 async def main():
@@ -105,12 +139,43 @@ async def main():
                 new_tweets.reverse()
 
                 for tweet in new_tweets:
-                    tweet_url = f"https://twitter.com/{TWITTER_USERNAME}/status/{tweet.id}"
-                    message = f"🐦 @{TWITTER_USERNAME}\n\n{tweet.text}\n\n{tweet_url}"
+                    text = format_tweet_text(tweet)
+
+                    # Extract media photo URLs
+                    photos = []
+                    if hasattr(tweet, 'media') and tweet.media:
+                        for m in tweet.media:
+                            m_type = getattr(m, 'type', None)
+                            m_url = getattr(m, 'media_url', None) or getattr(m, 'source_url', None)
+                            if m_type == 'photo' and m_url:
+                                photos.append(m_url)
+
                     try:
-                        await telegram.send_message(chat_id=TELEGRAM_CHANNEL_ID, text=message)
+                        if len(photos) == 1:
+                            # Single native photo post with caption
+                            await telegram.send_photo(
+                                chat_id=TELEGRAM_CHANNEL_ID,
+                                photo=photos[0],
+                                caption=text,
+                                parse_mode="HTML"
+                            )
+                        elif len(photos) > 1:
+                            # Multiple native photos media group
+                            media_group = [
+                                InputMediaPhoto(media=url, caption=text if i == 0 else "", parse_mode="HTML")
+                                for i, url in enumerate(photos[:10])
+                            ]
+                            await telegram.send_media_group(chat_id=TELEGRAM_CHANNEL_ID, media=media_group)
+                        else:
+                            # Text-only post
+                            await telegram.send_message(
+                                chat_id=TELEGRAM_CHANNEL_ID,
+                                text=text,
+                                parse_mode="HTML"
+                            )
+
                         seen_ids.add(tweet.id)
-                        log.info("📨 Posted tweet %s", tweet.id)
+                        log.info("📨 Posted tweet %s to Telegram", tweet.id)
                     except TelegramError as e:
                         log.error("Telegram error: %s", e)
 
