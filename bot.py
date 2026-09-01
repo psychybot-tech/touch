@@ -27,6 +27,8 @@ TWITTER_USERNAME     = os.getenv("TWITTER_USERNAME")      # account to MONITOR
 TWITTER_AUTH_EMAIL   = os.getenv("TWITTER_AUTH_EMAIL")    # burner login
 TWITTER_AUTH_USER    = os.getenv("TWITTER_AUTH_USERNAME")
 TWITTER_AUTH_PASS    = os.getenv("TWITTER_AUTH_PASSWORD")
+TWITTER_AUTH_TOKEN   = os.getenv("TWITTER_AUTH_TOKEN")
+TWITTER_CT0          = os.getenv("TWITTER_CT0")
 POLL_INTERVAL        = int(os.getenv("POLL_INTERVAL_SECONDS", 30))
 
 COOKIES_FILE = "cookies.json"
@@ -37,7 +39,16 @@ COOKIES_FILE = "cookies.json"
 async def get_twitter_client() -> Client:
     client = Client(language="en-US")
 
-    # Reuse saved cookies to avoid logging in every restart
+    # Method 1: Direct session cookies (Bypasses guest activation / KEY_BYTE errors on cloud servers)
+    if TWITTER_AUTH_TOKEN and TWITTER_CT0:
+        log.info("Authenticating using provided session cookies (auth_token & ct0)…")
+        client.set_cookies({
+            "auth_token": TWITTER_AUTH_TOKEN,
+            "ct0": TWITTER_CT0,
+        })
+        return client
+
+    # Method 2: Reuse saved cookies file
     if os.path.exists(COOKIES_FILE):
         log.info("Loading saved Twitter cookies…")
         client.load_cookies(COOKIES_FILE)
@@ -58,9 +69,12 @@ async def get_twitter_client() -> Client:
 # Main polling loop
 # ─────────────────────────────────────────────
 async def main():
-    if not all([TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, TWITTER_USERNAME,
-                TWITTER_AUTH_EMAIL, TWITTER_AUTH_USER, TWITTER_AUTH_PASS]):
-        log.error("Missing environment variables. Check your .env file.")
+    if not all([TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, TWITTER_USERNAME]):
+        log.error("Missing basic environment variables. Check TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID, TWITTER_USERNAME.")
+        return
+
+    if not (TWITTER_AUTH_TOKEN and TWITTER_CT0) and not all([TWITTER_AUTH_EMAIL, TWITTER_AUTH_USER, TWITTER_AUTH_PASS]):
+        log.error("Missing Twitter auth details. Provide either TWITTER_AUTH_TOKEN & TWITTER_CT0 OR username, email & password.")
         return
 
     telegram = Bot(token=TELEGRAM_BOT_TOKEN)
