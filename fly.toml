@@ -1,0 +1,17 @@
+app = "twitter-telegram-bot"
+primary_region = "iad"  # Washington DC — change to nearest: lhr=London, fra=Frankfurt, sin=Singapore
+
+[build]
+
+[env]
+  POLL_INTERVAL_SECONDS = "30"
+  NITTER_INSTANCES = "nitter.net,nitter.privacydev.net,nitter.poast.org"
+
+# No HTTP service needed — this is a worker bot (polling only)
+[processes]
+  app = "python -u bot.py"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
